@@ -1,174 +1,165 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+import cv2
+import mediapipe as mp
+import pyautogui
+import numpy as np
+import random
+import util
+from pynput.mouse import Button, Controller
+from enum import IntEnum
+from ctypes import cast, POINTER
+from comtypes import CLSCTX_ALL
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+import screen_brightness_control as sbcontrol
 
-# C extensions
-*.so
+mouse = Controller()
+screen_width, screen_height = pyautogui.size()
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+mpHands = mp.solutions.hands
+hands = mpHands.Hands(
+    static_image_mode=False,
+    model_complexity=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7,
+    max_num_hands=1
+)
+def find_finger_tip(processed):
+    if processed.multi_hand_landmarks:
+        hand_landmarks = processed.multi_hand_landmarks[0]  # Assuming only one hand is detected
+        index_finger_tip = hand_landmarks.landmark[mpHands.HandLandmark.INDEX_FINGER_TIP]
+        return index_finger_tip
+    return None, None
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+def move_mouse(index_finger_tip):
+    if index_finger_tip is not None:
+        x = int(index_finger_tip.x * screen_width)
+        y = int(index_finger_tip.y / 2 * screen_height)
+        pyautogui.moveTo(x, y)
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
 
-# Translations
-*.mo
-*.pot
+def is_left_click(landmark_list, thumb_index_dist):
+    return (
+            util.get_angle(landmark_list[5], landmark_list[6], landmark_list[8]) < 50 and
+            util.get_angle(landmark_list[9], landmark_list[10], landmark_list[12]) > 90 and
+            thumb_index_dist > 50
+    )
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
 
-# Flask stuff:
-instance/
-.webassets-cache
+def is_right_click(landmark_list, thumb_index_dist):
+    return (
+            util.get_angle(landmark_list[9], landmark_list[10], landmark_list[12]) < 50 and
+            util.get_angle(landmark_list[5], landmark_list[6], landmark_list[8]) > 90  and
+            thumb_index_dist > 50
+    )
 
-# Scrapy stuff:
-.scrapy
 
-# Sphinx documentation
-docs/_build/
+def is_double_click(landmark_list, thumb_index_dist):
+    return (
+            util.get_angle(landmark_list[5], landmark_list[6], landmark_list[8]) < 50 and
+            util.get_angle(landmark_list[9], landmark_list[10], landmark_list[12]) < 50 and
+            thumb_index_dist > 50
+    )
 
-# PyBuilder
-.pybuilder/
-target/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+def is_screenshot(landmark_list, thumb_index_dist):
+    return (
+            util.get_angle(landmark_list[5], landmark_list[6], landmark_list[8]) < 50 and
+            util.get_angle(landmark_list[9], landmark_list[10], landmark_list[12]) < 50 and
+            thumb_index_dist < 50
+    )
 
-# IPython
-profile_default/
-ipython_config.py
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
+def calculate_distance(point1, point2):
+    return np.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
 
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#pdm.lock
-#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
-#   in version control.
-#   https://pdm.fming.dev/latest/usage/project/#working-with-version-control
-.pdm.toml
-.pdm-python
-.pdm-build/
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+def adjust_volume(landmark_list):
+    thumb_tip = landmark_list[4]  
+    index_tip = landmark_list[8]  
+    distance = calculate_distance(thumb_tip, index_tip)
+    volume = np.interp(distance, [0.02, 0.2], [0, 1])
+    devices = AudioUtilities.GetSpeakers()
+    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+    volume_controller = cast(interface, POINTER(IAudioEndpointVolume))
+    volume_controller.SetMasterVolumeLevelScalar(volume, None)
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
+    return "Volume: {:.0%}".format(volume)
 
-# SageMath parsed files
-*.sage.py
 
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+'''def adjust_brightness(landmark_list):
+    thumb_tip = landmark_list[4]  # Thumb tip
+    pinky_tip = landmark_list[20]  # Pinky finger tip
+    distance = calculate_distance(thumb_tip, pinky_tip)
+    brightness = np.interp(distance, [0.02, 0.2], [0, 100])
+    sbcontrol.set_brightness(int(brightness))
+    return "Brightness: {:.0f}%".format(brightness)'''
 
-# Spyder project settings
-.spyderproject
-.spyproject
+def detect_gesture(frame, landmark_list, processed):
+    if len(landmark_list) >= 21:
+        index_finger_tip = find_finger_tip(processed)
+        thumb_index_dist = util.get_distance([landmark_list[4], landmark_list[5]])
 
-# Rope project settings
-.ropeproject
+        if util.get_distance([landmark_list[4], landmark_list[5]]) < 50 and util.get_angle(landmark_list[5], landmark_list[6], landmark_list[8]) > 90:
+            move_mouse(index_finger_tip)
+        elif is_left_click(landmark_list, thumb_index_dist):
+            mouse.press(Button.left)
+            mouse.release(Button.left)
+            cv2.putText(frame, "Left Click", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        elif is_right_click(landmark_list, thumb_index_dist):
+            mouse.press(Button.right)
+            mouse.release(Button.right)
+            cv2.putText(frame, "Right Click", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        elif is_double_click(landmark_list, thumb_index_dist):
+            pyautogui.doubleClick()
+            cv2.putText(frame, "Double Click", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+        elif is_screenshot(landmark_list, thumb_index_dist):
+            im1 = pyautogui.screenshot()
+            label = random.randint(1, 1000)
+            im1.save(f'my_screenshot_{label}.png')
+            cv2.putText(frame, "Screenshot Taken", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+            
+        else:
+            
+            volume_action = adjust_volume(landmark_list)
+            if volume_action:
+                cv2.putText(frame, volume_action, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+            
+            '''brightness_action = adjust_brightness(landmark_list)
+            if brightness_action:
+                cv2.putText(frame, brightness_action, (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            '''
 
-# mkdocs documentation
-/site
+def main():
+    draw = mp.solutions.drawing_utils
+    cap = cv2.VideoCapture(0)
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+    try:
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame = cv2.flip(frame, 1)
+            frameRGB = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            processed = hands.process(frameRGB)
 
-# Pyre type checker
-.pyre/
+            landmark_list = []
+            if processed.multi_hand_landmarks:
+                hand_landmarks = processed.multi_hand_landmarks[0]  
+                draw.draw_landmarks(frame, hand_landmarks, mpHands.HAND_CONNECTIONS)
+                for lm in hand_landmarks.landmark:
+                    landmark_list.append((lm.x, lm.y))
 
-# pytype static type analyzer
-.pytype/
+            detect_gesture(frame, landmark_list, processed)
 
-# Cython debug symbols
-cython_debug/
+            cv2.imshow('Frame', frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
 
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
+if __name__ == '__main__':
+    main()
